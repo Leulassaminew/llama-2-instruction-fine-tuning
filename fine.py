@@ -57,8 +57,8 @@ tokenizer.pad_token = tokenizer.eos_token
 
 dataset = load_dataset("Leul78/qanda")
 def map_function(example):
-    question = f"#### Instruction: Categorize the text based on the sales technique used in it from one of these eight categories only:\n\nBUILDING RAPPORT\nNEEDS ASSESMENT\nCREATING URGENCY\nSOCIAL PROOF\nOVERCOMING OBJECTION\nCROSS SELLING OR UPSELLING\nVALUE BASED SELLING\nNONE\n\n ### Input: {example['Question'].strip()}"
-    output = f"#### Assistant: {example['Answer'].strip()}"
+    question = f"#### Instruction: Categorize the text based on the sales technique used in it from one of these eight categories only:\n\nBUILDING RAPPORT\nNEEDS ASSESMENT\nCREATING URGENCY\nSOCIAL PROOF\nOVERCOMING OBJECTION\nCROSS SELLING OR UPSELLING\nVALUE BASED SELLING\nNONE\n\n ### Input: {example['text'].strip()}"
+    output = f"#### Assistant: {example['category'].strip()}"
     question_encoded = tokenizer(question)
     output_encoded = tokenizer(output, max_length=max_length-1-len(question_encoded["input_ids"]), truncation=True, padding="max_length")
     output_encoded["input_ids"] = output_encoded["input_ids"] + [tokenizer.pad_token_id]
