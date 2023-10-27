@@ -6,7 +6,7 @@ import shutil
 
 
 
-lora_path = "outputs_squad/checkpoint-18200" # Path to the LoRA weights
+lora_path = "outputs_squad/checkpoint-50" # Path to the LoRA weights
 output_path = "outputs_squad/merged_model"   # Path to output the merged weights
 model_type = "llama"                      # falcon or llama or wizard7 or wizard13
 
@@ -34,8 +34,8 @@ elif model_type == "wizard13":
     path = os.listdir("models/models--WizardLM--WizardLM-13B-V1.2/snapshots")[0]
     path = os.path.join("models/models--WizardLM--WizardLM-13B-V1.2/snapshots", path)
 elif model_type == "llama":
-    path = os.listdir("models/models--meta-llama--Llama-2-13b-chat-hf/snapshots")[0]
-    path = os.path.join("models/models--meta-llama--Llama-2-13b-chat-hf/snapshots", path)
+    path = os.listdir("models/models--Leul78--llama-2-13b-chat-pri/snapshots")[0]
+    path = os.path.join("models/models--Leul78--llama-2-13b-chat-pri/snapshots", path)
 else:
     raise ValueError("Invalid model type")
 shutil.copytree(path, output_path, dirs_exist_ok=True, ignore=shutil.ignore_patterns('*.pt', "*.pth", "*.bin"))

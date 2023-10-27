@@ -20,7 +20,7 @@ from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, Pe
 from trl import SFTTrainer
 
 
-model_name = "meta-llama/Llama-2-13b-chat-hf"
+model_name = "Leul78/llama-13b-chat-pri"
 
 load_in_4bit = True
 bnb_4bit_use_double_quant = True
@@ -29,7 +29,7 @@ bnb_4bit_compute_dtype = torch.bfloat16
 lora_r = 16
 lora_alpha = 16
 lora_dropout = 0.1
-bias = "none"
+bias = "all"
 task_type = "SEQ_CLS"
 output_dir = "outputs_squad"
 per_device_train_batch_size = 1
@@ -38,6 +38,7 @@ learning_rate = 0.00005
 optim = "adafactor"
 max_steps = 60
 warmup_steps = 5
+save_steps=50
 fp16 = True
 logging_steps = 25
 
@@ -77,11 +78,12 @@ def load_model(model_name, bnb_config):
         quantization_config = bnb_config,
         device_map = "auto", # dispatch the model efficiently on the available resources
         cache_dir="./models",
+        token = "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"
     )
 
     # Load model tokenizer with the user authentication token
-    tokenizer = AutoTokenizer.from_pretrained(model_name, use_auth_token = True,    trust_remote_code=True,
-    cache_dir="./models",)
+    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True,
+    cache_dir="./models",token = "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")
 
     # Set padding token as EOS token
     tokenizer.pad_token = tokenizer.eos_token
@@ -93,7 +95,7 @@ def load_model(model_name, bnb_config):
 bnb_config = create_bnb_config(load_in_4bit, bnb_4bit_use_double_quant, bnb_4bit_quant_type, bnb_4bit_compute_dtype)
 model, tokenizer = load_model(model_name, bnb_config)
 
-dataset = load_dataset("Leul78/total")
+dataset = load_dataset("Leul78/total",token = "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")
 
 def create_prompt_formats(sample):
     """
@@ -186,7 +188,7 @@ def preprocess_dataset(tokenizer: AutoTokenizer, max_length: int, seed, dataset:
     dataset = dataset.map(
         _preprocessing_function,
         batched = True,
-        remove_columns = ["instruction", "text", "category", "newtext"],
+        remove_columns = ["text", "category", "newtext"],
     )
 
     # Filter out samples that have "input_ids" exceeding "max_length"
@@ -286,12 +288,13 @@ def fine_tune(model,
     # Training parameters
     trainer = Trainer(
         model = model,
-        train_dataset = dataset,
+        train_dataset = dataset["train"],
         args = TrainingArguments(
             per_device_train_batch_size = per_device_train_batch_size,
             gradient_accumulation_steps = gradient_accumulation_steps,
             warmup_steps = warmup_steps,
             max_steps = max_steps,
+            save_steps=save_steps,
             learning_rate = learning_rate,
             fp16 = fp16,
             logging_steps = logging_steps,
@@ -301,7 +304,6 @@ def fine_tune(model,
         data_collator = DataCollatorForLanguageModeling(tokenizer, mlm = False)
     )
 
-    model.config.use_cache = False
 
     do_train = True
 
@@ -321,13 +323,10 @@ def fine_tune(model,
     os.makedirs(output_dir, exist_ok = True)
     trainer.model.save_pretrained(output_dir)
 
-    # Free memory for merging weights
-    del model
-    del trainer
-    torch.cuda.empty_cache()
     
 
-    fine_tune(model,
+
+fine_tune(model,
       tokenizer,
       preprocessed_dataset,
       lora_r,
