@@ -20,7 +20,7 @@ from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, Pe
 from trl import SFTTrainer
 
 
-model_name = "meta-llama/Llama-2-13b-chat-hf"
+model_name = "Leul78/llama-13b-chat-pri"
 
 load_in_4bit = True
 bnb_4bit_use_double_quant = True
