@@ -1,5 +1,6 @@
 from datasets import load_dataset, load_from_disk
 from peft import LoraConfig, get_peft_model
+from functools import partial
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -56,25 +57,113 @@ tokenizer = AutoTokenizer.from_pretrained("Leul78/llama-13b-chat-pri",
 tokenizer.pad_token = tokenizer.eos_token
 
 dataset = load_dataset("Leul78/qanda")
-def map_function(example):
-    question = f"#### Instruction: Categorize the text based on the sales technique used in it from one of these eight categories only:\n\nBUILDING RAPPORT\nNEEDS ASSESMENT\nCREATING URGENCY\nSOCIAL PROOF\nOVERCOMING OBJECTION\nCROSS SELLING OR UPSELLING\nVALUE BASED SELLING\nNONE\n\n ### Input: {example['Question'].strip()}"
-    output = f"#### Assistant: {example['Answer'].strip()}"
-    question_encoded = tokenizer(question)
-    output_encoded = tokenizer(output, max_length=max_length-1-len(question_encoded["input_ids"]), truncation=True, padding="max_length")
-    output_encoded["input_ids"] = output_encoded["input_ids"] + [tokenizer.pad_token_id]
-    output_encoded["attention_mask"] = output_encoded["attention_mask"] + [0]
+def create_prompt_formats(sample):
+    """
+    Creates a formatted prompt template for a prompt in the instruction dataset
 
-    input_ids = question_encoded["input_ids"] + output_encoded["input_ids"]
-    attention_mask = [1]*len(question_encoded["input_ids"]) + [1]*(sum(output_encoded["attention_mask"])+1) + [0]*(len(output_encoded["attention_mask"])-sum(output_encoded["attention_mask"])-1)
-    labels = [input_ids[i] if attention_mask[i] == 1 else -100 for i in range(len(attention_mask))]
-    assert len(labels) == len(attention_mask) and len(attention_mask) == len(input_ids), "Labels is not the correct length"  
-    return {
-            "input_ids": input_ids,
-            "labels": labels,
-            "attention_mask": attention_mask
-        }  
-dataset = dataset["train"].map(map_function)
-# Randomize data
+    :param sample: Prompt or sample from the instruction dataset
+    """
+
+    # Initialize static strings for the prompt template
+    INSTRUCTION_KEY = "### Instruction:"
+    INPUT_KEY = "Input:"
+    RESPONSE_KEY = "### Response:"
+    END_KEY = "### End"
+    instruct = "'Categorize the text based on the sales technique used in it from one of these categories only and offer no explanation:\n\nBUILDING RAPPORT\nNEEDS ASSESMENT\nCREATING URGENCY\nSOCIAL PROOF\nOVERCOMING OBJECTION\nCROSS SELLING OR UPSELLING\nVALUE BASED SELLING\nNONE\n\n"
+
+    # Combine a prompt with the static strings
+    instruction = f"{INSTRUCTION_KEY}\n{instruct}"
+    input_context = f"{INPUT_KEY}\n{sample['text']}" if sample["text"] else None
+    response = f"{RESPONSE_KEY}\n{sample['category']}"
+    end = f"{END_KEY}"
+
+    # Create a list of prompt template elements
+    parts = [part for part in [instruction, input_context, response, end] if part]
+
+    # Join prompt template elements into a single string to create the prompt template
+    formatted_prompt = "\n\n".join(parts)
+
+    # Store the formatted prompt template in a new key "text"
+    sample["newtext"] = formatted_prompt
+
+    return sample
+
+def get_max_length(model):
+    """
+    Extracts maximum token length from the model configuration
+
+    :param model: Hugging Face model
+    """
+
+    # Pull model configuration
+    conf = model.config
+    # Initialize a "max_length" variable to store maximum sequence length as null
+    max_length = None
+    # Find maximum sequence length in the model configuration and save it in "max_length" if found
+    for length_setting in ["n_positions", "max_position_embeddings", "seq_length"]:
+        max_length = getattr(model.config, length_setting, None)
+        if max_length:
+            print(f"Found max lenth: {max_length}")
+            break
+    # Set "max_length" to 1024 (default value) if maximum sequence length is not found in the model configuration
+    if not max_length:
+        max_length = 1024
+        print(f"Using default max length: {max_length}")
+    return max_length
+
+def preprocess_batch(batch, tokenizer, max_length):
+    """
+    Tokenizes dataset batch
+
+    :param batch: Dataset batch
+    :param tokenizer: Model tokenizer
+    :param max_length: Maximum number of tokens to emit from the tokenizer
+    """
+
+    return tokenizer(
+        batch["newtext"],
+        max_length = max_length,
+        truncation = True,
+    )
+
+
+def preprocess_dataset(tokenizer: AutoTokenizer, max_length: int, seed, dataset: str):
+    """
+    Tokenizes dataset for fine-tuning
+
+    :param tokenizer (AutoTokenizer): Model tokenizer
+    :param max_length (int): Maximum number of tokens to emit from the tokenizer
+    :param seed: Random seed for reproducibility
+    :param dataset (str): Instruction dataset
+    """
+
+    # Add prompt to each sample
+    print("Preprocessing dataset...")
+    dataset = dataset.map(create_prompt_formats)
+
+    # Apply preprocessing to each batch of the dataset & and remove "instruction", "input", "output", and "text" fields
+    _preprocessing_function = partial(preprocess_batch, max_length = max_length, tokenizer = tokenizer)
+    dataset = dataset.map(
+        _preprocessing_function,
+        batched = True,
+        remove_columns = ["text", "category", "newtext"],
+    )
+
+    # Filter out samples that have "input_ids" exceeding "max_length"
+    dataset = dataset.filter(lambda sample: len(sample["input_ids"]) < max_length)
+
+    # Shuffle dataset
+    dataset = dataset.shuffle(seed = seed)
+
+    return dataset
+
+
+# Random seed
+seed = 33
+
+max_length = get_max_length(model)
+dataset = preprocess_dataset(tokenizer, max_length, seed, dataset)
+
 dataset = dataset.shuffle()
 
 # Test/train split
