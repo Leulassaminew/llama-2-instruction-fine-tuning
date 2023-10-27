@@ -32,11 +32,10 @@ lora_dropout = 0.1
 bias = "all"
 task_type = "SEQ_CLS"
 output_dir = "outputs_squad"
-per_device_train_batch_size = 1
-gradient_accumulation_steps = 4
+per_device_train_batch_size = 6
+gradient_accumulation_steps = 6
 learning_rate = 0.00005
 optim = "adafactor"
-max_steps = 60
 warmup_steps = 5
 save_steps=50
 fp16 = True
@@ -105,7 +104,6 @@ def create_prompt_formats(sample):
     """
 
     # Initialize static strings for the prompt template
-    INTRO_BLURB = "Below is an instruction that describes a task. Write a response that appropriately completes the request."
     INSTRUCTION_KEY = "### Instruction:"
     INPUT_KEY = "Input:"
     RESPONSE_KEY = "### Response:"
@@ -113,14 +111,13 @@ def create_prompt_formats(sample):
     instruct = "'Categorize the text based on the sales technique used in it from one of these categories only and offer no explanation:\n\nBUILDING RAPPORT\nNEEDS ASSESMENT\nCREATING URGENCY\nSOCIAL PROOF\nOVERCOMING OBJECTION\nCROSS SELLING OR UPSELLING\nVALUE BASED SELLING\nNONE\n\n"
 
     # Combine a prompt with the static strings
-    blurb = f"{INTRO_BLURB}"
     instruction = f"{INSTRUCTION_KEY}\n{instruct}"
     input_context = f"{INPUT_KEY}\n{sample['text']}" if sample["text"] else None
     response = f"{RESPONSE_KEY}\n{sample['category']}"
     end = f"{END_KEY}"
 
     # Create a list of prompt template elements
-    parts = [part for part in [blurb, instruction, input_context, response, end] if part]
+    parts = [part for part in [instruction, input_context, response, end] if part]
 
     # Join prompt template elements into a single string to create the prompt template
     formatted_prompt = "\n\n".join(parts)
@@ -293,7 +290,7 @@ def fine_tune(model,
             per_device_train_batch_size = per_device_train_batch_size,
             gradient_accumulation_steps = gradient_accumulation_steps,
             warmup_steps = warmup_steps,
-            max_steps = max_steps,
+            num_train_epochs=8,
             save_steps=save_steps,
             learning_rate = learning_rate,
             fp16 = fp16,
