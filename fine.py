@@ -1,6 +1,7 @@
 from datasets import load_dataset, load_from_disk
 from peft import LoraConfig, get_peft_model
 from functools import partial
+import torch
 import copy
 import datasets
 from transformers import (
@@ -77,17 +78,29 @@ def get_preprocessed_samsum( tokenizer, split):
 
     dataset = dataset.map(apply_prompt_template, remove_columns=list(dataset.features))
 
-    def tokenize_add_label(sample):
-        prompt = tokenizer.encode(tokenizer.bos_token + sample["prompt"], add_special_tokens=False)
-        summary = tokenizer.encode(sample["response"] +  tokenizer.eos_token, add_special_tokens=False)
-
-        sample = {
-            "input_ids": prompt + summary,
-            "attention_mask" : [1] * (len(prompt) + len(summary)),
-            "labels": [-100] * len(prompt) + summary,
-            }
-
-        return sample
+    def tokenize_add_label(data):
+        IGNORE_INDEX = -100
+        prompt = data['prompt']
+        example = prompt+data['response']
+        prompt = torch.tensor(
+            tokenizer.encode(prompt, padding='max_length', truncation=True, max_length=max_length), dtype=torch.int64
+        )
+        example = tokenizer.encode(example,padding='max_length', truncation=True, max_length=max_length)
+        example.append(tokenizer.eos_token_id)
+        example = torch.tensor(
+            example, dtype=torch.int64
+        )
+        labels = copy.deepcopy(example)
+        labels[: len(prompt)] = -1
+        example_mask = example.ge(0)
+        label_mask = labels.ge(0)
+        example[~example_mask] = 0
+        labels[~label_mask] = IGNORE_INDEX
+        return {
+            "input_ids": example.tolist(),
+            "labels": labels.tolist(),
+            "attention_mask":example_mask.tolist(),
+        }
 
     dataset = dataset.map(tokenize_add_label, remove_columns=list(dataset.features))
 
