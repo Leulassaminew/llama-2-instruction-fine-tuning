@@ -28,8 +28,8 @@ output_dir = "outputs_squad"                              # Directory to save th
 optim_type = "adafactor"                            # Optimizer type to train with 
 learning_rate = 0.00005                              # Model learning rate
 weight_decay = 0.002                                # Model weight decay
-per_device_train_batch_size = 8                     # Train batch size on each GPU
-per_device_eval_batch_size = 8                      # Eval batch size on each GPU
+per_device_train_batch_size = 6                    # Train batch size on each GPU
+per_device_eval_batch_size = 6                      # Eval batch size on each GPU
 gradient_accumulation_steps = 2                     # Number of steps before updating model
 warmup_steps = 5                                    # Number of warmup steps for learning rate
 save_steps = 100                                     # Number of steps before saving model
@@ -53,7 +53,7 @@ tokenizer = AutoTokenizer.from_pretrained("Leul78/llama-13b-chat-pri",
                                                 
 tokenizer.pad_token = tokenizer.eos_token
 
-dataset = load_dataset("csv", data_files = 'perf.csv', split = "train")
+dataset = load_dataset("Leul78/total", split = "train")
 def map_function(example):
     question = f"#### Human: Categorize the sales technique used in the Input{example['question'].strip()}"
     output = f"#### Assistant: {example['answer'].strip()}"
@@ -95,6 +95,7 @@ model = get_peft_model(model, peft_config)
 model.print_trainable_parameters()
 training_args = TrainingArguments(
     output_dir=output_dir,
+    num_train_epochs=1,
     evaluation_strategy="epoch",
     optim=optim_type,
     learning_rate=learning_rate,
