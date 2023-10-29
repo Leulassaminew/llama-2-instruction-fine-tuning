@@ -1,6 +1,8 @@
 from datasets import load_dataset, load_from_disk
 from peft import LoraConfig, get_peft_model
 from functools import partial
+import copy
+import datasets
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -55,26 +57,42 @@ tokenizer = AutoTokenizer.from_pretrained("Leul78/llama-13b-chat-pri",
                                             cache_dir="./models",)
                                                 
 tokenizer.pad_token = tokenizer.eos_token
+prompt_input = ("Below is an instruction that describes a task, paired with an input that provides further context."
+                "Write a response that appropriately completes the request.\n\n"
+                "### Instruction:\nCategorize the sales technique used in the Input.\n\n### Input:\n{input}\n\n### Response:"
+                  )
+def get_preprocessed_samsum( tokenizer, split):
+    dataset = datasets.load_dataset("Leul78/total", split=split)
 
-dataset = load_dataset("Leul78/qanda")
-def map_function(example):
-    question = f"#### Instruction: Categorize the text based on the sales technique used in it from one of these eight categories only:\n\nBUILDING RAPPORT\nNEEDS ASSESMENT\nCREATING URGENCY\nSOCIAL PROOF\nOVERCOMING OBJECTION\nCROSS SELLING OR UPSELLING\nVALUE BASED SELLING\nNONE\n\n ### Input: {example['Question'].strip()}"
-    output = f"#### Assistant: {example['Answer'].strip()}"
-    question_encoded = tokenizer(question)
-    output_encoded = tokenizer(output, max_length=max_length-1-len(question_encoded["input_ids"]), truncation=True, padding="max_length")
-    output_encoded["input_ids"] = output_encoded["input_ids"] + [tokenizer.pad_token_id]
-    output_encoded["attention_mask"] = output_encoded["attention_mask"] + [0]
+    prompt = (f"""Below is an instruction that describes a task, paired with an input that provides further context."
+                Write a response that appropriately completes the request.\n\n
+                ### Instruction:\nCategorize the sales technique used in the Input.\n\n### Input:\n{input}\n\n### Response:"""
+                  )
 
-    input_ids = question_encoded["input_ids"] + output_encoded["input_ids"]
-    attention_mask = [1]*len(question_encoded["input_ids"]) + [1]*(sum(output_encoded["attention_mask"])+1) + [0]*(len(output_encoded["attention_mask"])-sum(output_encoded["attention_mask"])-1)
-    labels = [input_ids[i] if attention_mask[i] == 1 else -100 for i in range(len(attention_mask))]
-    assert len(labels) == len(attention_mask) and len(attention_mask) == len(input_ids), "Labels is not the correct length"  
-    return {
-            "input_ids": input_ids,
-            "labels": labels,
-            "attention_mask": attention_mask
-        }  
-dataset = dataset["train"].map(map_function)
+    def apply_prompt_template(sample):
+        return {
+            "prompt": prompt.format(input=sample["text"]),
+            "response": sample["category"],
+        }
+
+    dataset = dataset.map(apply_prompt_template, remove_columns=list(dataset.features))
+
+    def tokenize_add_label(sample):
+        prompt = tokenizer.encode(tokenizer.bos_token + sample["prompt"], add_special_tokens=False)
+        summary = tokenizer.encode(sample["response"] +  tokenizer.eos_token, add_special_tokens=False)
+
+        sample = {
+            "input_ids": prompt + summary,
+            "attention_mask" : [1] * (len(prompt) + len(summary)),
+            "labels": [-100] * len(prompt) + summary,
+            }
+
+        return sample
+
+    dataset = dataset.map(tokenize_add_label, remove_columns=list(dataset.features))
+
+    return dataset
+dataset = get_preprocessed_samsum(tokenizer,"train")
 # Randomize data
 dataset = dataset.shuffle()
 
@@ -100,7 +118,7 @@ training_args = TrainingArguments(
     output_dir=output_dir,
     evaluation_strategy="epoch",
     optim=optim_type,
-    num_train_epochs=8,
+    num_train_epochs=2,
     learning_rate=learning_rate,
     weight_decay=weight_decay,
     per_device_train_batch_size=per_device_train_batch_size,
