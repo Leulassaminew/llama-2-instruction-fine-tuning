@@ -9,7 +9,7 @@ from transformers import (
     TrainingArguments,
     Trainer,
 )
-max_length = 128
+max_length = 256
 load_in_4bit = True
 lora_alpha = 16             # How much to weigh LoRA params over pretrained params
 lora_dropout = 0.1          # Dropout for LoRA weights to avoid overfitting
@@ -89,7 +89,7 @@ peft_config = LoraConfig(
     lora_dropout=lora_dropout,
     r=lora_r,
     bias=lora_bias,
-    task_type="SEQ_CLS",
+    task_type="CAUSAL_LM",
     inference_mode=False,
     target_modules=lora_target_modules
 )
