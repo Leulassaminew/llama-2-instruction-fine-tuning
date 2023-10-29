@@ -1,9 +1,5 @@
 from datasets import load_dataset, load_from_disk
 from peft import LoraConfig, get_peft_model
-from functools import partial
-import torch
-import copy
-import datasets
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -12,11 +8,11 @@ from transformers import (
     TrainingArguments,
     Trainer,
 )
-max_length = 256
+max_length = 128
 load_in_4bit = True
 lora_alpha = 16             # How much to weigh LoRA params over pretrained params
 lora_dropout = 0.1          # Dropout for LoRA weights to avoid overfitting
-lora_r = 32                 # Bottleneck size between A and B matrix for LoRA params
+lora_r = 16                 # Bottleneck size between A and B matrix for LoRA params
 lora_bias = "all" 
 lora_target_modules = [
     "q_proj",
@@ -32,8 +28,8 @@ output_dir = "outputs_squad"                              # Directory to save th
 optim_type = "adafactor"                            # Optimizer type to train with 
 learning_rate = 0.00005                              # Model learning rate
 weight_decay = 0.002                                # Model weight decay
-per_device_train_batch_size = 6                     # Train batch size on each GPU
-per_device_eval_batch_size = 6                      # Eval batch size on each GPU
+per_device_train_batch_size = 8                     # Train batch size on each GPU
+per_device_eval_batch_size = 8                      # Eval batch size on each GPU
 gradient_accumulation_steps = 2                     # Number of steps before updating model
 warmup_steps = 5                                    # Number of warmup steps for learning rate
 save_steps = 100                                     # Number of steps before saving model
@@ -49,63 +45,33 @@ if load_in_4bit == True:
                                                 trust_remote_code=True, 
                                                 device_map="auto", 
                                                 quantization_config=bnb_config,
-                                                 token="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",
                                                 cache_dir="./models",)
 # Load in the tokenizer
 tokenizer = AutoTokenizer.from_pretrained("Leul78/llama-13b-chat-pri",
                                             trust_remote_code=True,
-                                          token="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",
                                             cache_dir="./models",)
                                                 
 tokenizer.pad_token = tokenizer.eos_token
-prompt_input = ("Below is an instruction that describes a task, paired with an input that provides further context."
-                "Write a response that appropriately completes the request.\n\n"
-                "### Instruction:\nCategorize the sales technique used in the Input.\n\n### Input:\n{input}\n\n### Response:"
-                  )
-def get_preprocessed_samsum( tokenizer, split):
-    dataset = datasets.load_dataset("Leul78/total", split=split)
 
-    prompt = (f"""Below is an instruction that describes a task, paired with an input that provides further context."
-                Write a response that appropriately completes the request.\n\n
-                ### Instruction:\nCategorize the sales technique used in the Input.\n\n### Input:\n{input}\n\n### Response:"""
-                  )
+dataset = load_dataset("csv", data_files = 'perf.csv', split = "train")
+def map_function(example):
+    question = f"#### Human: Categorize the sales technique used in the Input{example['question'].strip()}"
+    output = f"#### Assistant: {example['answer'].strip()}"
+    question_encoded = tokenizer(question)
+    output_encoded = tokenizer(output, max_length=max_length-1-len(question_encoded["input_ids"]), truncation=True, padding="max_length")
+    output_encoded["input_ids"] = output_encoded["input_ids"] + [tokenizer.pad_token_id]
+    output_encoded["attention_mask"] = output_encoded["attention_mask"] + [0]
 
-    def apply_prompt_template(sample):
-        return {
-            "prompt": prompt.format(input=sample["text"]),
-            "response": sample["category"],
-        }
-
-    dataset = dataset.map(apply_prompt_template, remove_columns=list(dataset.features))
-
-    def tokenize_add_label(data):
-        IGNORE_INDEX = -100
-        prompt = data['prompt']
-        example = prompt+data['response']
-        prompt = torch.tensor(
-            tokenizer.encode(prompt, padding='max_length', truncation=True, max_length=max_length), dtype=torch.int64
-        )
-        example = tokenizer.encode(example,padding='max_length', truncation=True, max_length=max_length)
-        example.append(tokenizer.eos_token_id)
-        example = torch.tensor(
-            example, dtype=torch.int64
-        )
-        labels = copy.deepcopy(example)
-        labels[: len(prompt)] = -1
-        example_mask = example.ge(0)
-        label_mask = labels.ge(0)
-        example[~example_mask] = 0
-        labels[~label_mask] = IGNORE_INDEX
-        return {
-            "input_ids": example.tolist(),
-            "labels": labels.tolist(),
-            "attention_mask":example_mask.tolist(),
-        }
-
-    dataset = dataset.map(tokenize_add_label, remove_columns=list(dataset.features))
-
-    return dataset
-dataset = get_preprocessed_samsum(tokenizer,"train")
+    input_ids = question_encoded["input_ids"] + output_encoded["input_ids"]
+    attention_mask = [1]*len(question_encoded["input_ids"]) + [1]*(sum(output_encoded["attention_mask"])+1) + [0]*(len(output_encoded["attention_mask"])-sum(output_encoded["attention_mask"])-1)
+    labels = [input_ids[i] if attention_mask[i] == 1 else -100 for i in range(len(attention_mask))]
+    assert len(labels) == len(attention_mask) and len(attention_mask) == len(input_ids), "Labels is not the correct length"  
+    return {
+            "input_ids": input_ids,
+            "labels": labels,
+            "attention_mask": attention_mask
+        }  
+dataset = dataset["train"].map(map_function)
 # Randomize data
 dataset = dataset.shuffle()
 
@@ -115,6 +81,7 @@ test_size = len(dataset) - train_size
 data_train = dataset.select(range(train_size))
 data_test = dataset.select(range(train_size, train_size + test_size))
 
+# Adapt the model with LoRA weights
 peft_config = LoraConfig(
     lora_alpha=lora_alpha,
     lora_dropout=lora_dropout,
@@ -126,12 +93,10 @@ peft_config = LoraConfig(
 )
 model = get_peft_model(model, peft_config)
 model.print_trainable_parameters()
-
 training_args = TrainingArguments(
     output_dir=output_dir,
     evaluation_strategy="epoch",
     optim=optim_type,
-    num_train_epochs=2,
     learning_rate=learning_rate,
     weight_decay=weight_decay,
     per_device_train_batch_size=per_device_train_batch_size,
