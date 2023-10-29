@@ -12,7 +12,7 @@ import torch
 import datasets
 import copy
 
-max_length = 256
+max_length = 128
 load_in_4bit = True
 lora_alpha = 16             # How much to weigh LoRA params over pretrained params
 lora_dropout = 0.1          # Dropout for LoRA weights to avoid overfitting
@@ -30,7 +30,7 @@ lora_target_modules = [
 # Trainer params
 output_dir = "outputs_squad"                              # Directory to save the model
 optim_type = "adafactor"                            # Optimizer type to train with 
-learning_rate = 2e-4                              # Model learning rate
+learning_rate = 0.00005                              # Model learning rate
 weight_decay = 0.002                                # Model weight decay
 per_device_train_batch_size = 6                     # Train batch size on each GPU
 per_device_eval_batch_size = 6                      # Eval batch size on each GPU
@@ -125,7 +125,7 @@ training_args = TrainingArguments(
     output_dir=output_dir,
     evaluation_strategy="epoch",
     optim=optim_type,
-    num_train_epochs=8,
+    num_train_epochs=1,
     learning_rate=learning_rate,
     weight_decay=weight_decay,
     per_device_train_batch_size=per_device_train_batch_size,
@@ -146,3 +146,4 @@ trainer = Trainer(
 
 # Train the model
 trainer.train()
+trainer.save_model()
